@@ -46,6 +46,8 @@ python3 run.py check-template "路径/已填写模板.xlsx"
 python3 run.py learn-report "路径/processing-summary.xlsx" --product "产品名"
 ```
 
+`check-template` 默认只输出终端结果；需要落地报告时加 `--write-report` 或 `-o`。
+
 ## 下一步建议
 
 1. 在工作台里增加资料放置指引和文件打开按钮。

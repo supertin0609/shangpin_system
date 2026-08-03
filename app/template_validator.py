@@ -6,6 +6,13 @@ from openpyxl import load_workbook
 from .paths import OUTPUTS_DIR
 from .listing_rules import validate_listing_row
 from .template_sheet import find_template_sheet, template_sheet_names_text
+from .variation_title_rules import (
+    PARENT_COLOR_PHRASE,
+    PARENT_STYLE_PHRASE,
+    has_parent_only_phrase,
+    package_prefix_for_row,
+    title_starts_with_package_prefix,
+)
 
 
 FIELD_NAMES = {
@@ -14,6 +21,7 @@ FIELD_NAMES = {
     "condition": "condition_type[marketplace_id=ATVPDKIKX0DER]#1.value",
     "list_price": "list_price[marketplace_id=ATVPDKIKX0DER]#1.value",
     "haul_price": "purchasable_offer[marketplace_id=ATVPDKIKX0DER][audience=BZR]#1.our_price#1.schedule#1.value_with_tax",
+    "minimum_seller_allowed_price": "purchasable_offer[marketplace_id=ATVPDKIKX0DER][audience=BZR]#1.minimum_seller_allowed_price#1.schedule#1.value_with_tax",
     "item_depth": "item_depth_width_height[marketplace_id=ATVPDKIKX0DER]#1.depth.value",
     "item_depth_unit": "item_depth_width_height[marketplace_id=ATVPDKIKX0DER]#1.depth.unit",
     "item_height": "item_depth_width_height[marketplace_id=ATVPDKIKX0DER]#1.height.value",
@@ -24,11 +32,117 @@ FIELD_NAMES = {
     "parent_sku": "child_parent_sku_relationship[marketplace_id=ATVPDKIKX0DER]#1.parent_sku",
     "variation_theme": "variation_theme#1.name",
     "title": "item_name[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
+    "item_highlight": "title_differentiation[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
     "description": "product_description[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
     "generic_keyword": "generic_keyword[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
+    "color": "color[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
+    "size": "size[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
+    "number_of_items": "number_of_items[marketplace_id=ATVPDKIKX0DER]#1.value",
+    "item_package_quantity": "item_package_quantity[marketplace_id=ATVPDKIKX0DER]#1.value",
+    "contains_battery_or_cell": "contains_battery_or_cell[marketplace_id=ATVPDKIKX0DER]#1.value",
+    "dog_breed_size": "dog_breed_size[marketplace_id=ATVPDKIKX0DER]#1.value",
 }
 
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _text(value):
+    return str(value or "").strip()
+
+
+def _contains_exact_text(text, value):
+    text = _text(text)
+    value = _text(value)
+    if not text or not value:
+        return False
+    return re.search(rf"(?<![A-Za-z0-9]){re.escape(value)}(?![A-Za-z0-9])", text, re.I) is not None
+
+
+def _unique_values(items, key):
+    values = []
+    seen = set()
+    for item in items:
+        value = _text(item.get(key))
+        if not value:
+            continue
+        lowered = value.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        values.append(value)
+    return values
+
+
+def _valid_values_row(wb, label_prefix):
+    if "Valid Values" not in wb.sheetnames:
+        return set()
+    ws = wb["Valid Values"]
+    for row in ws.iter_rows(values_only=True):
+        values = [_text(value) for value in row]
+        if any(value.startswith(label_prefix) for value in values):
+            return {value for value in values if value and not value.startswith(label_prefix)}
+    return set()
+
+
+def _variation_theme_values(wb, product_type):
+    product_type = _text(product_type)
+    if not product_type:
+        return set()
+    return _valid_values_row(wb, f"Variation Theme Name - [ {product_type} ]")
+
+
+def _requires_package_prefix(info):
+    prefix = package_prefix_for_row({
+        "set_count": info.get("package_quantity") or info.get("number_of_items"),
+        "title": "",
+    })
+    return bool(prefix)
+
+
+def _validate_variation_titles(findings, row_infos):
+    parents_by_sku = {
+        _text(info.get("sku")): info
+        for info in row_infos.values()
+        if _text(info.get("parentage")).lower() == "parent" and _text(info.get("sku"))
+    }
+    children_by_parent = {}
+    for info in row_infos.values():
+        if _text(info.get("parentage")).lower() != "child":
+            continue
+        parent_sku = _text(info.get("parent_sku"))
+        if parent_sku:
+            children_by_parent.setdefault(parent_sku, []).append(info)
+
+    for info in row_infos.values():
+        title = _text(info.get("title"))
+        sku = info.get("sku")
+        if _requires_package_prefix(info) and not title_starts_with_package_prefix(title):
+            findings.append(error(info["row"], "Title", f"{sku} 是多件装/套装，但标题未以数量或套装前缀开头。", "多件装和套装标题首位写明数量，例如 50 Pcs 或 2 Set，然后再接商品关键词。"))
+        if _text(info.get("parentage")).lower() == "child":
+            if has_parent_only_phrase(title):
+                findings.append(error(info["row"], "Title", f"{sku} 是 Child 行，但标题包含父体总结词。", f"Child 标题只保留通用标题和自身变体属性，不填写 {PARENT_COLOR_PHRASE} 或 {PARENT_STYLE_PHRASE}。"))
+
+    for parent_sku, children in children_by_parent.items():
+        parent = parents_by_sku.get(parent_sku)
+        if not parent:
+            continue
+        parent_title = _text(parent.get("title"))
+        theme = " ".join(_text(item.get("variation_theme")).lower() for item in [parent] + children)
+        colors = _unique_values(children, "color")
+        sizes = _unique_values(children, "size")
+        if len(colors) > 1 and not _contains_exact_text(parent_title, PARENT_COLOR_PHRASE):
+            findings.append(error(parent["row"], "Title", f"{parent_sku} 是多颜色 Parent，但标题未说明多色可选。", f"Parent 标题基于通用标题生成，并加入 {PARENT_COLOR_PHRASE}。"))
+        if len(sizes) > 1 and not _contains_exact_text(parent_title, PARENT_STYLE_PHRASE):
+            findings.append(error(parent["row"], "Title", f"{parent_sku} 是多款式 Parent，但标题未说明多款式可选。", f"Parent 标题基于通用标题生成，并加入 {PARENT_STYLE_PHRASE}。"))
+
+        for child in children:
+            child_title = _text(child.get("title"))
+            if "color" in theme and _text(child.get("color")) and not _contains_exact_text(child_title, child.get("color")):
+                findings.append(error(child["row"], "Title", f"{child.get('sku')} 是颜色变体 Child，但标题未包含自身颜色 `{child.get('color')}`。", "Child 标题在通用标题基础上追加自己的颜色属性。"))
+            if "size" in theme and _text(child.get("size")) and not _contains_exact_text(child_title, child.get("size")):
+                findings.append(error(child["row"], "Title", f"{child.get('sku')} 是款式/尺寸变体 Child，但标题未包含自身属性 `{child.get('size')}`。", "Child 标题在通用标题基础上追加自己的尺寸或款式属性。"))
+
+
 COPY_FIELD_NAMES = {
     "Title": FIELD_NAMES["title"],
     "Description": FIELD_NAMES["description"],
@@ -41,6 +155,19 @@ COPY_FIELD_NAMES = {
 
 
 PRODUCT_TYPE_CONDITIONAL_FIELDS = {
+    "PLANTER": {
+        "Model Name": "model_name[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
+        "Special Features": "special_feature[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
+        "Mounting Type": "mounting_type[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
+        "Product Compliance Certificate": "required_product_compliance_certificate[marketplace_id=ATVPDKIKX0DER]#1.value",
+    },
+    "HEALTH_PERSONAL_CARE": {
+        "Is the Item Heat Sensitive?": "is_heat_sensitive[marketplace_id=ATVPDKIKX0DER]#1.value",
+        "Is Product Expirable": "is_expiration_dated_product[marketplace_id=ATVPDKIKX0DER]#1.value",
+        "Unit Count": "unit_count[marketplace_id=ATVPDKIKX0DER]#1.value",
+        "Unit Count Type": "unit_count[marketplace_id=ATVPDKIKX0DER]#1.type[language_tag=en_US].value",
+        "Contains Liquid Contents?": "contains_liquid_contents[marketplace_id=ATVPDKIKX0DER]#1.value",
+    },
     "ANIMAL_COLLAR": {
         "Item Type Keyword": "item_type_keyword[marketplace_id=ATVPDKIKX0DER]#1.value",
         "Model Number": "model_number[marketplace_id=ATVPDKIKX0DER]#1.value",
@@ -254,6 +381,7 @@ PRODUCT_TYPE_CONDITIONAL_FIELDS = {
         "Material": "material[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
         "Number of Items": "number_of_items[marketplace_id=ATVPDKIKX0DER]#1.value",
         "Item Package Quantity": "item_package_quantity[marketplace_id=ATVPDKIKX0DER]#1.value",
+        "Subject Character": "subject_character[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
         "Color": "color[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
         "Size": "size[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
         "Part Number": "part_number[marketplace_id=ATVPDKIKX0DER]#1.value",
@@ -375,6 +503,15 @@ def _is_parent_optional_required_field(field_name):
     return any(token in lowered for token in [
         "color[",
         "size[",
+        "title_differentiation",
+        "condition_type",
+        "model_number",
+        "model_name",
+        "manufacturer",
+        "part_number",
+        "special_feature",
+        "mounting_type",
+        "required_product_compliance_certificate",
         "list_price",
         "purchasable_offer",
         "skip_offer",
@@ -386,6 +523,9 @@ def _is_parent_optional_required_field(field_name):
         "item_length_width",
         "item_dimensions",
         "item_weight",
+        "is_heat_sensitive",
+        "is_expiration_dated_product",
+        "contains_liquid_contents",
         "unit_count",
         "number_of_items",
         "number_of_packs",
@@ -403,7 +543,7 @@ def _is_parent_optional_required_field(field_name):
     ])
 
 
-def validate_template_file(path, output_path=None, write_report=True):
+def validate_template_file(path, output_path=None, write_report=False):
     path = Path(path)
     wb = load_workbook(path, data_only=True, read_only=True)
     ws = find_template_sheet(wb)
@@ -426,12 +566,20 @@ def validate_template_file(path, output_path=None, write_report=True):
                 data_rows.append(row)
 
     condition_col = field_to_col.get(FIELD_NAMES["condition"])
+    item_highlight_col = field_to_col.get(FIELD_NAMES["item_highlight"])
     skip_offer_col = field_to_col.get(FIELD_NAMES["skip_offer"])
     list_price_col = field_to_col.get(FIELD_NAMES["list_price"])
     haul_price_col = field_to_col.get(FIELD_NAMES["haul_price"])
     parentage_col = field_to_col.get(FIELD_NAMES["parentage_level"])
     parent_sku_col = field_to_col.get(FIELD_NAMES["parent_sku"])
     variation_theme_col = field_to_col.get(FIELD_NAMES["variation_theme"])
+    title_col = field_to_col.get(FIELD_NAMES["title"])
+    color_col = field_to_col.get(FIELD_NAMES["color"])
+    size_col = field_to_col.get(FIELD_NAMES["size"])
+    number_of_items_col = field_to_col.get(FIELD_NAMES["number_of_items"])
+    item_package_quantity_col = field_to_col.get(FIELD_NAMES["item_package_quantity"])
+    contains_battery_or_cell_col = field_to_col.get(FIELD_NAMES["contains_battery_or_cell"])
+    dog_breed_size_col = field_to_col.get(FIELD_NAMES["dog_breed_size"])
     product_type_col = field_to_col.get("product_type#1.value")
     required_fields = _required_fields_from_data_definitions(wb)
     dimension_pairs = [
@@ -440,23 +588,49 @@ def validate_template_file(path, output_path=None, write_report=True):
         ("Item Width", field_to_col.get(FIELD_NAMES["item_width"]), field_to_col.get(FIELD_NAMES["item_width_unit"])),
     ]
     available_dimension_pairs = [pair for pair in dimension_pairs if pair[1] and pair[2]]
+    row_infos = {}
+    variation_theme_values_by_product_type = {}
+
+    for row in data_rows:
+        row_infos[row] = {
+            "row": row,
+            "sku": ws.cell(row, sku_col).value if sku_col else "",
+            "parentage": ws.cell(row, parentage_col).value if parentage_col else "",
+            "parent_sku": ws.cell(row, parent_sku_col).value if parent_sku_col else "",
+            "variation_theme": ws.cell(row, variation_theme_col).value if variation_theme_col else "",
+            "title": ws.cell(row, title_col).value if title_col else "",
+            "color": ws.cell(row, color_col).value if color_col else "",
+            "size": ws.cell(row, size_col).value if size_col else "",
+            "number_of_items": ws.cell(row, number_of_items_col).value if number_of_items_col else "",
+            "package_quantity": ws.cell(row, item_package_quantity_col).value if item_package_quantity_col else "",
+        }
 
     for row in data_rows:
         sku = ws.cell(row, sku_col).value
         parentage = str(ws.cell(row, parentage_col).value or "").strip().lower() if parentage_col else ""
         is_parent = parentage == "parent"
         is_child = parentage == "child"
-        if condition_col:
+        if condition_col and not is_parent:
             condition = ws.cell(row, condition_col).value
             if condition != "New":
                 findings.append(error(row, "Item Condition", f"{sku} 的 Item Condition 不是 New，当前为 `{condition}`。", "新品统一填写 New。"))
-        else:
+        elif not condition_col:
             findings.append(error(row, "Item Condition", "模板中找不到 Item Condition 字段。", "确认模板是否包含 condition_type 字段。"))
 
         if skip_offer_col:
             skip_offer = ws.cell(row, skip_offer_col).value
             if skip_offer not in (None, ""):
                 findings.append(error(row, "Skip Offer", f"{sku} 的 Skip Offer 应留空，当前为 `{skip_offer}`。", "不要填写 skip_offer，让报价随价格字段正常生成。"))
+
+        if contains_battery_or_cell_col:
+            contains_battery_or_cell = ws.cell(row, contains_battery_or_cell_col).value
+            if contains_battery_or_cell == "No":
+                findings.append(error(row, "Contains Battery or Cell", f"{sku} 的 Contains Battery or Cell 不能填 No。", "该字段有效值是 Battery 或 Cell；非电池商品按当前规则留空。"))
+
+        if dog_breed_size_col:
+            dog_breed_size = ws.cell(row, dog_breed_size_col).value
+            if dog_breed_size == "All Breed Sizes":
+                findings.append(error(row, "Dog Breed Size", f"{sku} 的 Dog Breed Size 不能填 All Breed Sizes。", "ANIMAL_COLLAR 模板有效值为 Extra Small、Small、Medium、Large、Giant、All；通用值填 All。"))
 
         if list_price_col and haul_price_col and not is_parent:
             list_price = ws.cell(row, list_price_col).value
@@ -465,6 +639,12 @@ def validate_template_file(path, output_path=None, write_report=True):
                 findings.append(error(row, "List Price", f"{sku} 的 List Price 为空。", "上传前填写数字价格。"))
             if haul_price in (None, ""):
                 findings.append(error(row, "Haul Price", f"{sku} 的 Haul Price 为空。", "Haul/BZR 价格应与 List Price 同步。"))
+        if item_highlight_col:
+            title_col = field_to_col.get(FIELD_NAMES["title"])
+            title = str(ws.cell(row, title_col).value or "") if title_col else ""
+            item_highlight = ws.cell(row, item_highlight_col).value
+            if item_highlight not in (None, "") and len(title) > 75:
+                findings.append(error(row, "Item Highlight", f"{sku} 填写了 Item Highlight，但 Item Name 长度为 {len(title)}，超过 75 字符。", "标题按 100-125 字符规则时清空 Item Highlight；只有标题不超过 75 字符时才填写该字段。"))
 
         for label, value_col, unit_col in available_dimension_pairs:
             value = ws.cell(row, value_col).value
@@ -516,6 +696,14 @@ def validate_template_file(path, output_path=None, write_report=True):
 
         if product_type_col:
             product_type = ws.cell(row, product_type_col).value
+            product_type_text = _text(product_type)
+            if product_type_text not in variation_theme_values_by_product_type:
+                variation_theme_values_by_product_type[product_type_text] = _variation_theme_values(wb, product_type_text)
+            allowed_variation_themes = variation_theme_values_by_product_type[product_type_text]
+            if variation_theme_col and allowed_variation_themes:
+                variation_theme = ws.cell(row, variation_theme_col).value
+                if variation_theme not in (None, "") and _text(variation_theme) not in allowed_variation_themes:
+                    findings.append(error(row, "Variation Theme", f"{sku} 的 Variation Theme `{variation_theme}` 不在当前模板 Valid Values 中。", "按当前模板 Valid Values 精确填写，包括大小写、斜杠和空格，例如 COLOR。"))
             for field_name, label in required_fields.items():
                 col = field_to_col.get(field_name)
                 if not col:
@@ -541,6 +729,8 @@ def validate_template_file(path, output_path=None, write_report=True):
                 value = ws.cell(row, col).value
                 if value not in (None, ""):
                     findings.append(error(row, label, f"{sku} 的 {label} 当前不应填写，值为 `{value}`。", "TOWEL 当前 ships_globally 条件下该合规字段不允许提交，清空该字段。"))
+
+    _validate_variation_titles(findings, row_infos)
 
     if write_report:
         if output_path is None:
@@ -578,9 +768,11 @@ def write_template_report(path, checked_file, findings, data_rows):
             "",
             "已确认：",
             "",
-            "- Item Condition = New",
+            "- 非 Parent 行 Item Condition = New，Parent 行可留空",
             "- Skip Offer 留空",
             "- List Price / Haul Price 已填写",
+            "- 卖方最低价格默认留空，不限制人工填写值",
+            "- 标题超过 75 字符时 Item Highlight 留空",
             "- 模板包含 Item Depth/Height/Width 字段时，其数值与单位成对填写",
             ""
         ])

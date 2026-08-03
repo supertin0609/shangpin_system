@@ -9,6 +9,7 @@ from .paths import DRAFT_DIRS, TEMPLATE_DIRS, safe_name
 from .success_rule_defaults import load_safe_defaults
 from .template_sheet import find_template_sheet, template_sheet_names_text
 from .template_validator import PRODUCT_TYPE_CONDITIONAL_FIELDS
+from .variation_title_rules import apply_variation_title_rules
 from .versioning import versioned_template_path
 from .workbook_io import read_intake_rows
 
@@ -31,7 +32,6 @@ FIELD_MAP = {
     "variation_theme#1.name": "variation_theme",
     "model_number[marketplace_id=ATVPDKIKX0DER]#1.value": "sku",
     "manufacturer[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value": "manufacturer",
-    "main_product_image_locator[marketplace_id=ATVPDKIKX0DER]#1.media_location": "main_image_url",
     "product_description[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value": "description",
     "bullet_point[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value": "bullet_1",
     "bullet_point[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#2.value": "bullet_2",
@@ -146,6 +146,8 @@ PARENT_CLEAR_FIELDS = {
     "parent_sku",
     "color",
     "size",
+    "manufacturer",
+    "model_name",
     "cost",
     "target_price",
     "list_price",
@@ -155,6 +157,22 @@ PARENT_CLEAR_FIELDS = {
     "package_height_in",
     "package_weight_lb",
     "main_image_url",
+}
+
+PARENT_SKIP_FIELD_NAMES = {
+    "model_number[marketplace_id=ATVPDKIKX0DER]#1.value",
+    "model_name[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
+    "manufacturer[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
+    "part_number[marketplace_id=ATVPDKIKX0DER]#1.value",
+    "title_differentiation[marketplace_id=ATVPDKIKX0DER][language_tag=en_US]#1.value",
+    "condition_type[marketplace_id=ATVPDKIKX0DER]#1.value",
+    "skip_offer[marketplace_id=ATVPDKIKX0DER]#1.value",
+    "list_price[marketplace_id=ATVPDKIKX0DER]#1.value",
+    "purchasable_offer[marketplace_id=ATVPDKIKX0DER][audience=BZR]#1.our_price#1.schedule#1.value_with_tax",
+    "purchasable_offer[marketplace_id=ATVPDKIKX0DER][audience=BZR]#1.minimum_seller_allowed_price#1.schedule#1.value_with_tax",
+    "purchasable_offer[marketplace_id=ATVPDKIKX0DER][audience=BZR]#1.maximum_seller_allowed_price#1.schedule#1.value_with_tax",
+    "purchasable_offer[marketplace_id=ATVPDKIKX0DER][audience=BZR]#1.start_at.value",
+    "purchasable_offer[marketplace_id=ATVPDKIKX0DER][audience=BZR]#1.end_at.value",
 }
 
 
@@ -321,7 +339,7 @@ def prepare_variation_rows(rows, project_dir):
                 row["parent_sku"] = parent_sku
             if _text(row.get("parent_sku")) and not _text(row.get("parentage_level")):
                 row["parentage_level"] = "Child"
-        return prepared
+        return apply_variation_title_rules(prepared)
 
     if not _should_default_variation(prepared):
         return prepared
@@ -345,7 +363,7 @@ def prepare_variation_rows(rows, project_dir):
         if not _text(row.get("sku")):
             row["sku"] = f"{_sku_base(row.get('product_name') or Path(project_dir).name)}-{index:03d}"
         child_rows.append(row)
-    return [parent] + child_rows
+    return apply_variation_title_rules([parent] + child_rows)
 
 
 def _row_text(row):
@@ -523,12 +541,22 @@ def _stable_field_default(field_name, row):
         return 1
     if "unit_count" in field and ".type" in field:
         return "Count"
+    if "is_heat_sensitive" in field:
+        return "No"
+    if "is_expiration_dated_product" in field:
+        return "No"
     if "included_components" in field:
         return row.get("accessories") or f"{count} Count"
     if "specific_uses_for_product" in field:
         return "Outdoor" if str(row.get("category") or "").lower() in {"garden", "patio", "sports"} else "Everyday Use"
     if "recommended_uses_for_product" in field:
         return "Chewing" if str(row.get("product_type") or "").upper() == "PET_TOY" else "Everyday Use"
+    if "special_feature" in field:
+        return "Foldable"
+    if "mounting_type" in field:
+        return "Tabletop"
+    if "dog_breed_size" in field:
+        return "All"
     if "breed_recommendation" in field:
         return "All Breed Sizes"
     if "pet_toy_type" in field:
@@ -583,6 +611,12 @@ def _write_required_defaults(ws, row_index, row_data, field_to_col, required_fie
         if not col or ws.cell(row_index, col).value not in (None, ""):
             continue
         if is_parent and any(token in field_name for token in [
+            "title_differentiation",
+            "condition_type",
+            "model_number",
+            "model_name",
+            "manufacturer",
+            "part_number",
             "list_price",
             "purchasable_offer",
             "item_package_dimensions",
@@ -640,6 +674,8 @@ def fill_template(project_dir, draft_path=None, template_path=None, output_path=
         for field_name, source in FIELD_MAP.items():
             col = field_to_col.get(field_name)
             if not col:
+                continue
+            if _is_parent_row(row_data) and field_name in PARENT_SKIP_FIELD_NAMES:
                 continue
             value = _value_for(row_data, source)
             if value in (None, ""):
@@ -718,6 +754,7 @@ def write_fill_report(path, output_path, draft_path, template_path, rows, writte
         f"- Item Type Keyword：{first.get('item_type_keyword')}",
         f"- List Price：{first.get('list_price') or '留空，等待人工填写'}",
         f"- Haul Price：{first.get('haul_price') or '留空，后续与 List Price 保持一致'}",
+        "- Minimum Seller Allowed Price：默认留空",
         f"- Main Image URL：留空",
         "",
         "## 已写入字段",

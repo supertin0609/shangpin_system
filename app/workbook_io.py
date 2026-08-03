@@ -76,7 +76,7 @@ def create_intake_workbook(path):
     ws.append([
         "示例项目",
         "示例收纳袋",
-        "Haul Generic",
+        "Haul Generic Variation",
         "Generic",
         "Generic",
         "home",
@@ -102,7 +102,7 @@ def create_intake_workbook(path):
         "China",
         "No",
         "No",
-        "https://example.com/main.jpg",
+        "",
         "https://example.com/supplier",
         "https://example.com/competitor",
         "Large Storage Bag for Travel and Closet Organization, Black",
@@ -130,13 +130,14 @@ def create_intake_workbook(path):
     descriptions = {
         "route": "填写 Haul Generic、Haul Generic Variation、Haul Generic Set Bundle 或 Brand。",
         "brand": "Generic 路线建议填写 Generic；品牌路线填写真实品牌。",
-        "manufacturer": "Generic 路线建议和 Brand 逻辑一致；品牌路线与包装、图片、文案统一。",
+        "manufacturer": "Generic 路线建议和 Brand 逻辑一致；品牌路线与包装、文案统一。",
         "parent_sku/parentage_level/variation_theme": "独立 SKU 留空；父子变体填写 Parent/Child、父 SKU 和 Color/Size 等变体主题。",
         "target_price": "内部目标售价，用于判断 Haul 价格风险。",
         "haul_price": "Haul 上传价，若走 Haul 路线建议填写。",
         "package_length_in/package_width_in/package_height_in": "单位为 inches。",
         "package_weight_lb": "单位为 pounds。",
         "batteries_required/dangerous_goods": "建议填写 Yes 或 No。",
+        "main_image_url": "图片字段默认不参与自动填表；即使填写也不会写入 Amazon 模板。",
         "competitor_links": "多个链接可以用逗号或换行分隔。"
     }
     for field, desc in descriptions.items():

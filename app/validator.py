@@ -204,7 +204,7 @@ def validate_intake(path):
                     "row": row_number,
                     "field": "manufacturer",
                     "message": "Generic 路线下 Manufacturer 与无品牌逻辑不一致。",
-                    "fix": "建议 Manufacturer 也按 Generic 逻辑处理，并确认图片、包装、文案没有品牌痕迹。"
+                    "fix": "建议 Manufacturer 也按 Generic 逻辑处理，并确认包装、文案没有品牌痕迹；图片字段默认不处理。"
                 })
 
             copy = " ".join(_lower(row.get(field)) for field in TEXT_FIELDS)
@@ -215,7 +215,7 @@ def validate_intake(path):
                         "row": row_number,
                         "field": "copy",
                         "message": f"Generic 文案里出现品牌痕迹提示词：{hint}",
-                        "fix": "检查标题、五点、描述和图片是否真的适合无品牌路线。"
+                        "fix": "检查标题、五点、描述是否真的适合无品牌路线；图片字段默认不处理。"
                     })
 
         for field in COPY_FIELDS:
@@ -287,7 +287,7 @@ def validate_intake(path):
                     "row": row_number,
                     "field": "brand",
                     "message": "品牌路线下 Brand 仍然是 Generic。",
-                    "fix": "填写真实品牌，并确保 Manufacturer、图片、包装、文案统一。"
+                    "fix": "填写真实品牌，并确保 Manufacturer、包装、文案统一；图片字段默认不处理。"
                 })
             if manufacturer and brand and manufacturer.lower() != brand.lower():
                 findings.append({
@@ -303,7 +303,7 @@ def validate_intake(path):
                     "row": row_number,
                     "field": "copy",
                     "message": "品牌路线文案里没有出现 Brand。",
-                    "fix": "确认图片、包装、标题、五点、描述的品牌表达是否统一。"
+                    "fix": "确认包装、标题、五点、描述的品牌表达是否统一；图片字段默认不处理。"
                 })
 
         if "haul" in route:

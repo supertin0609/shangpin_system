@@ -950,7 +950,7 @@ def _write_analysis_report(path, project_dir, sources, rows, combined):
         "",
         "- item_type_keyword",
         "- List Price / Haul Price",
-        "- 主图 URL 是否是可公开访问的图片直链",
+        "- 图片字段默认不处理；不要把供应商、1688、竞品或带文字/水印风险的图片链接写入模板",
         "- 是否真的适合 Generic 或 Haul Generic",
         "- 亚马逊模板里的条件必填字段",
         ""

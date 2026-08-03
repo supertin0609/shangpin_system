@@ -43,5 +43,10 @@
     "type": "审核队列",
     "meaning": "进入审核队列，通常不是立即可修的字段错误。",
     "fix": "先记录版本和上传时间，通常等待 24-48 小时再看状态。"
+  },
+  "100476": {
+    "type": "Item Highlight 标题长度规则",
+    "meaning": "填写 Item Highlight / title_differentiation 时，Amazon 要求 Item Name 不超过 75 字符。",
+    "fix": "当前项目标题默认 100-125 字符，因此父子体 V4 默认清空 Item Highlight；只有明确使用 75 字符以内短标题时才填写。"
   }
 }

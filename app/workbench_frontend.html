@@ -680,8 +680,8 @@
                 <input id="product-name" type="text">
                 <label>上架路线</label>
                 <div class="route-picker" id="route-picker" role="group" aria-label="上架路线">
-                  <button class="route-option active" type="button" data-route-mode="single_child">单链接子体</button>
-                  <button class="route-option" type="button" data-route-mode="variation">多链接变体</button>
+                  <button class="route-option" type="button" data-route-mode="single_child">单链接子体</button>
+                  <button class="route-option active" type="button" data-route-mode="variation">多链接变体</button>
                   <button class="route-option" type="button" data-route-mode="set_bundle">套装售卖</button>
                 </div>
               </div>
@@ -952,7 +952,7 @@
     let pendingActiveDir = "";
     let activeModule = "intake";
     let toastTimer = null;
-    let selectedRouteMode = "single_child";
+    let selectedRouteMode = "variation";
     const ROUTE_BY_MODE = {
       single_child: "Haul Generic",
       variation: "Haul Generic Variation",
@@ -1050,11 +1050,12 @@
       const value = String(route || "").toLowerCase();
       if (value.includes("variation")) return "variation";
       if (value.includes("set bundle")) return "set_bundle";
-      return "single_child";
+      if (value.includes("haul generic")) return "single_child";
+      return "variation";
     }
 
     function setRouteMode(mode) {
-      selectedRouteMode = ROUTE_BY_MODE[mode] ? mode : "single_child";
+      selectedRouteMode = ROUTE_BY_MODE[mode] ? mode : "variation";
       document.querySelectorAll("[data-route-mode]").forEach((button) => {
         button.classList.toggle("active", button.dataset.routeMode === selectedRouteMode);
       });

@@ -69,7 +69,7 @@ def cmd_analyze_project(args):
     draft_path, report_path = analyze_project(args.project_dir, args.output)
     print(f"自动提炼草稿：{draft_path}")
     print(f"资料提炼报告：{report_path}")
-    print("请先人工确认草稿里的价格、类目、item_type_keyword、品牌路线、图片 URL 和尺寸重量。")
+    print("请先人工确认草稿里的价格、类目、item_type_keyword、品牌路线和尺寸重量；图片字段默认不处理。")
 
 
 def cmd_parse_report(args):
@@ -115,8 +115,12 @@ def cmd_learn_report(args):
 
 
 def cmd_check_template(args):
-    findings, output_path = validate_template_file(args.template, args.output)
-    print(f"模板自检完成：{output_path}")
+    write_report = args.write_report or bool(args.output)
+    findings, output_path = validate_template_file(args.template, args.output, write_report=write_report)
+    if output_path:
+        print(f"模板自检完成：{output_path}")
+    else:
+        print("模板自检完成：未生成自检报告。")
     print(f"发现 {len(findings)} 个问题。")
 
 
@@ -286,7 +290,8 @@ def build_parser():
 
     check_template = subparsers.add_parser("check-template", help="检查已填好的上传模板")
     check_template.add_argument("template", help="已填好的 xlsx/xlsm 上传模板")
-    check_template.add_argument("-o", "--output", help="自检报告输出路径")
+    check_template.add_argument("-o", "--output", help="自检报告输出路径；指定后会生成报告")
+    check_template.add_argument("--write-report", action="store_true", help="额外生成模板自检报告；默认只在终端输出结果")
     check_template.set_defaults(func=cmd_check_template)
 
     auto_fill = subparsers.add_parser("auto-fill", help="自动提炼草稿、写入模板并执行模板自检")

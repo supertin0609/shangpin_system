@@ -2,22 +2,25 @@
 
 这份文档用于下次在新设备或新对话里快速复用“亚马逊模板填表”流程。目标是：少走弯路、优先用项目已有经验、避免慢速全量渲染、避开中文路径和文件锁问题。
 
+> 必须先读根目录 `PROJECT_RULES.md`。本文件是流程文档，实际字段写入以 `app/template_writer.py` 为准，模板自检以 `app/template_validator.py` 为准，成功样板默认值过滤以 `app/success_rule_defaults.py` 为准。
+
 ## 新对话启动提示
 
 可以直接把下面这段发给 Codex：
 
 ```text
-我要填亚马逊模板表格。请优先使用项目里现有的填表经验和字段映射，不要先用通用表格引擎全量导入/渲染模板。
+我要填亚马逊模板表格。请先读取 PROJECT_RULES.md、docs/amazon_template_fill_workflow.md、data/reference_docs/亚马逊上传表格_通用自检资料.md，并以 app/template_writer.py / app/template_validator.py 的实际规则为准。不要凭通用亚马逊填表经验直接填写。
 
 流程要求：
 1. 先读取最终价格表，确认 SKU、父体 SKU、子体 SKU、价格、尺寸、重量。
 2. 读取 Amazon 模板的 Data Definitions 和 Template 第 5 行字段名，确认必填字段。
 3. 读取 1688 详情和 Amazon 竞品详情，提炼标题、五点、描述、材质、颜色、卖点。
 4. 默认走多变体路线；保留 Template 第 6 行示例行，从第 7 行开始写 Parent/Child 数据。
-5. 优先使用 WPS 表格 COM 或 Excel/WPS 自动化接口写入 Template 页；如果不可用，再用 openpyxl 复制模板并只写目标字段。
-6. 只做字段级校验：父子体、必填字段、价格尺寸、重量、五点描述 5 个单元格、危险品/电池/原产国。
-7. 不要做大范围图片渲染，不要用慢速通用表格引擎处理整本 Amazon 模板，除非我明确要求视觉预览。
-8. 输出文件只保留填写好的上传表格，命名为 `产品名_V.xlsx`；根据错误报告修正后的版本依次为 `产品名_V2.xlsx`、`产品名_V3.xlsx`。
+5. 图片字段默认不处理：不写入、不迁移、不检查图片 URL；带文字、水印、详情页排版或无法确认合规的图片链接一律不要填。
+6. 优先使用 WPS 表格 COM 或 Excel/WPS 自动化接口写入 Template 页；如果不可用，再用 openpyxl 复制模板并只写目标字段。
+7. 只做字段级校验：父子体、必填字段、价格尺寸、重量、五点描述 5 个单元格、危险品/电池/原产国。
+8. 不要做大范围图片渲染，不要用慢速通用表格引擎处理整本 Amazon 模板，除非我明确要求视觉预览。
+9. 输出文件只保留填写好的上传表格，命名为 `产品名_V.xlsx`；根据错误报告修正后的版本依次为 `产品名_V2.xlsx`、`产品名_V3.xlsx`。
 ```
 
 ## 推荐执行顺序
@@ -30,7 +33,7 @@
 - 最终价格确认表 `.xls` / `.xlsx`
 - 1688 商品详情 HTML
 - Amazon 竞品详情 HTML
-- 需要时加入图片 URL 或图片文件
+- 图片文件或 URL 只作为人工素材存放；默认不写入 Amazon 图片字段
 
 2. 建立短路径工作区
 
@@ -49,7 +52,7 @@ Copy-Item -LiteralPath "D:\dpan\桌面\手机握把\*" -Destination C:\sp_work\p
 
 - `Template` 页第 5 行：字段名
 - `Data Definitions`：必填字段
-- `Valid Values` / `Browse Data`：Product Type、Item Type Keyword、有效值
+- `Valid Values` / `Browse Data`：Product Type、Item Type Keyword、有效值；枚举字段必须复制当前模板的精确值，包括大小写、斜杠和空格
 
 本项目已有经验：
 
@@ -69,6 +72,7 @@ Copy-Item -LiteralPath "D:\dpan\桌面\手机握把\*" -Destination C:\sp_work\p
 - Country of Origin：通常填 `China`
 - Batteries Required：无电池填 `No`
 - Dangerous Goods Regulations：普通无危险品填 `Not Applicable`
+- 图片字段：默认留空，不从任何来源继承或写入图片链接
 
 5. 写入方式优先级
 
@@ -134,11 +138,26 @@ WPS 表格常见 COM 名称：
 
 标题：
 
-- 控制在 125 字符以内。
-- 核心关键词靠前，核心关键词之间用英文逗号隔开。
+- 控制在 100-125 字符，尽量贴近 125 字符但不能超。
+- 2026-07-27 起 Amazon 官方非媒体类标题方向为 75 字符以内；项目当前仍按可上传的 100-125 字符生成长标题，超过 75 字符时 `Item Highlight` / `title_differentiation` 必须留空。
+- 核心关键词靠前，核心关键词之间用英文逗号隔开，并尽量覆盖更多相关关键词、长尾词、用途、场景和款式信息。
 - 除介词、冠词、连词外，单词首字母大写。
 - 除介词、冠词、连词外，同一单词不要超过两次。
-- 标题不放成分或材质词。
+- 标题允许资料可证明的普通材质词作为卖点，例如 `Velvet`、`Plastic`、`Silicone`。但材质安全/等级/环保/不含某物等合规宣称不要写进标题，例如 `Food Grade`、`Medical Grade`、`BPA Free`、`Phthalate Free`、`Lead Free`、`Latex Free`、`Flame Retardant`、`Waterproof`、`Biodegradable`、`Eco Friendly`、`Organic`、`Recycled`。
+- 标题禁用 Amazon 高风险特殊字符：`!`、`$`、`?`、`_`、`{`、`}`、`^`、`¬`、`¦`；除明确属于品牌名外不要使用。
+- 标题不使用装饰字符或网页噪音，例如 `~`、`#`、`<`、`>`、`*`、`|`、`;`、重复标点、HTML 标签、换行、制表符、连续多空格、中文或全角标点。
+- 标题不写促销、平台背书、物流或售后信息，例如 `Free Shipping`、`Sale`、`Discount`、`Best Seller`、`Amazon Choice`、`Warranty`、`Refund`、`Fast Delivery`。
+- 标题不写医疗、护理、清洁、防护或结果型功效表达，例如 `Dental`、`Teeth Cleaning`、`Oral Care`、`Plaque`、`Tartar`、`Health`、`Therapy`、`Treat`、`Cure`、`Prevent`、`Antibacterial`、`Disinfect`、`UV Protection`。
+- 标题不写食用/摄入暗示或绝对化成分宣称，例如 `Flavor`、`Edible`、`Digestible`、`Food Grade`、`Non-Toxic`、`Natural`、`100% Natural`、`All Natural`、`Pure`、`Chemical Free`、`Safe`、`Hypoallergenic`。非食品商品表达气味用 `Scent`。
+- 标题只表达商品类型、款式/形状、适用对象、使用场景和可感知属性；凡涉及“身体、皮肤、牙齿、空气、环境更健康/更干净/更安全”的结果型表达，默认不写进标题。
+
+父子体标题：
+
+- Parent 标题不继承第一条 Child 标题，而是从当前 Child 标题中提取共同商品关键词，生成能覆盖全部子体的总结性标题。
+- Parent 标题不带具体单一颜色、尺寸或款式；多颜色变体写 `Multiple Colors Available`，多尺寸或多款式变体写 `Multiple Styles Available`。
+- Child 标题使用通用标题骨架，并追加自己的颜色、尺寸或款式属性；Child 标题不写 `Multiple Colors Available`、`Multiple Styles Available` 等 Parent 总结词。
+- 多件装或套装在 Parent 和 Child 标题中都要说明，并放在标题首位，例如 `50 Pcs`、`2 Set`。
+- 父子体标题生成后仍按当前标题规则自检：100-125 字符、Title Case、关键词自然覆盖、不超字符上限、不含禁用词和敏感材质宣称。
 
 Generic Keywords：
 
@@ -171,10 +190,11 @@ Product Description：
 
 - SKU：父体 SKU
 - Parentage Level：`Parent`
-- Variation Theme：例如 `Color`
+- Variation Theme：必须按当前模板 `Valid Values` 精确填写，例如 PET_TOY 可能要求 `COLOR`，不要凭语义写成 `Color`
 - Brand：`Generic`
-- Item Name：可不带具体颜色
+- Item Name：基于子体标题生成通用总结标题，不继承第一条子体标题，不带具体单一颜色/尺寸/款式；多颜色写 `Multiple Colors Available`，多款式写 `Multiple Styles Available`
 - 通常不填 Parent SKU
+- 不填 Item Condition、Model Number、Model Name、Manufacturer、Part Number、Item Highlight、价格、报价日期、最低/最高价、包装尺寸、包装重量、颜色、尺寸等子体/报价/可售专属字段；图片字段全路线默认不处理
 
 子体行：
 
@@ -182,10 +202,12 @@ Product Description：
 - Parentage Level：`Child`
 - Parent SKU：父体 SKU
 - Child Relationship Type：`Variation`
-- Variation Theme：例如 `Color`
-- Title Differentiation：例如 `Black`
+- Variation Theme：与 Parent 保持一致，并且必须是当前模板 `Valid Values` 中的精确枚举值
+- Item Highlight / Title Differentiation：标题按 100-125 字符时留空；只有标题不超过 75 字符时才可填写
 - Color：例如 `Black`
+- Item Name：基于通用标题骨架追加自身颜色、尺寸或款式属性，不写 Parent 的总结词或多色/多款式可选词
 - 价格、尺寸、重量按最终价格表填写
+- `List Price` 和 Haul/BZR `our_price` 必填；`minimum_seller_allowed_price` 默认留空，不做人工填写值限制
 
 ## Google Drive 怎么加速
 
@@ -259,8 +281,10 @@ Get-ChildItem -Force | Where-Object { $_.Name -like '~$*' }
 - 父体 SKU / 子体 SKU 正确
 - 子体 Parent SKU 指向父体
 - Product Type 正确
-- Brand / Manufacturer 是 `Generic`
-- 价格、尺寸、重量与最终价格表一致
+- Brand 是 `Generic`；子体 Manufacturer 是 `Generic`，父体 Manufacturer 留空
+- 父体 Item Condition / Model Number / Model Name / Manufacturer / Part Number / Item Highlight / 价格 / 包装尺寸重量留空
+- 子体 List Price / Haul Price 与最终价格表一致，卖方最低价格默认留空
+- 标题超过 75 字符时，Item Highlight 留空
 - 必填字段非空
 - 五点描述 5 个单元格非空
 - `Country of Origin = China`

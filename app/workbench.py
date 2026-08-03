@@ -410,7 +410,7 @@ def _intake_module_payload(project_dir, product_name, rows, draft_file, rows_err
             },
         ],
         "basic": [
-            {"label": "路线", "field": "route", "value": first.get("route") or "Haul Generic", "source": "系统推断", "scope": "all"},
+            {"label": "路线", "field": "route", "value": first.get("route") or "Haul Generic Variation", "source": "系统推断", "scope": "all"},
             {"label": "Brand", "field": "brand", "value": first.get("brand") or "Generic", "source": "路线", "scope": "all"},
             {"label": "Manufacturer", "field": "manufacturer", "value": first.get("manufacturer") or "Generic", "source": "路线", "scope": "all"},
             {"label": "品类", "field": "category", "value": first.get("category") or first.get("product_type") or "", "source": "系统推断", "scope": "all"},
